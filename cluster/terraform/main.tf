@@ -1,3 +1,30 @@
+terraform {
+  required_version = ">= 1.0.0"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = ">= 3.72"
+    }
+    kubernetes = {
+      source  = "hashicorp/kubernetes"
+      version = ">= 2.10"
+    }
+    helm = {
+      source  = "hashicorp/helm"
+      version = ">= 2.4.1"
+    }
+    kubectl = {
+      source  = "gavinbunney/kubectl"
+      version = ">= 1.14"
+    }
+    docker = {
+      source  = "kreuzwerker/docker"
+      version = "~> 3.0.1"
+    }
+  }
+}
+
 provider "aws" {
   region = "us-east-1"
   alias  = "virginia"
@@ -23,6 +50,12 @@ provider "kubectl" {
   cluster_ca_certificate = base64decode(module.eks.cluster_certificate_authority_data)
   load_config_file       = false
   token                  = data.aws_eks_cluster_auth.this.token
+}
+
+variable "region" {
+  description = "Region to deploy the resources"
+  type        = string
+  default     = "eu-west-1"
 }
 
 data "aws_eks_cluster_auth" "this" {
@@ -184,4 +217,24 @@ module "vpc" {
   }
 
   tags = local.tags
+}
+
+output "configure_kubectl" {
+  description = "Configure kubectl: make sure you're logged in with the correct AWS profile and run the following command to update your kubeconfig"
+  value       = "aws eks --region ${local.region} update-kubeconfig --name ${module.eks.cluster_name}"
+}
+
+output "cluster_name" {
+  description = "Cluster name of the EKS cluster"
+  value       = module.eks.cluster_name
+}
+
+output "node_instance_profile_name" {
+  description = "IAM Role name that each Karpenter node will use"
+  value       = module.eks_blueprints_addons.karpenter.node_instance_profile_name
+}
+
+output "vpc_id" {
+  description = "VPC ID that the EKS cluster is using"
+  value       = module.vpc.vpc_id
 }
