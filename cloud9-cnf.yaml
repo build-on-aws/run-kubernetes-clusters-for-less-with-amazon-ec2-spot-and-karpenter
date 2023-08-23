@@ -245,10 +245,7 @@ Resources:
             - echo "export AWS_REGION=${AWS_REGION}" >> /home/ec2-user/.bash_profile
             - sudo -H -u ec2-user aws configure set default.region ${AWS_REGION}
             - sudo -H -u ec2-user aws configure get default.region
-            - sudo -H -u ec2-user aws sts get-caller-identity
-            - echo '=== Generate SSH key and import to aws ==='
-            - sudo -H -u ec2-user ssh-keygen -f /home/ec2-user/.ssh/id_rsa1 -P ''
-            - sudo -H -u ec2-user aws ec2 import-key-pair --key-name "eksworkshop" --public-key-material file:///home/ec2-user/.ssh/id_rsa1.pub
+            - sudo -H -u ec2-user aws sts get-caller-identity            
             - echo '=== Install Terraform ==='
             - sudo yum install -y yum-utils
             - sudo yum-config-manager --add-repo https://rpm.releases.hashicorp.com/AmazonLinux/hashicorp.repo
