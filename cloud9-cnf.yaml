@@ -1,6 +1,6 @@
 ---
 AWSTemplateFormatVersion: '2010-09-09'
-Description: AWS CloudFormation template to create a Cloud9 environment setup with kubectl, eksctl and an EKS cluster with a managed node group. Please allow ~20min for the EKS cluster to be ready.
+Description: AWS CloudFormation template to create a Cloud9 environment setup with kubectl and Terraform.
 Metadata:
   Author:
     Description: Christian Melendez <chrismld@amazon.es>
@@ -255,7 +255,6 @@ Resources:
             - helm repo add stable https://charts.helm.sh/stable/
             - helm repo update
             - echo '=== Finishing ==='
-            - . /home/ec2-user/.bash_profile
 
   C9BootstrapAssociation:
     Type: AWS::SSM::Association

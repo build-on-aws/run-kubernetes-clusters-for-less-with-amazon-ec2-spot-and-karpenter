@@ -3,27 +3,41 @@ kind: Provisioner
 metadata:
   name: default
 spec:
-  labels:
-    intent: apps
   requirements:
-    - key: "karpenter.k8s.aws/instance-hypervisor"
-      operator: NotIn
-      values: [""]
-    - key: karpenter.sh/capacity-type
+    - key: kubernetes.io/arch
+      operator: In
+      values: ["arm64", "amd64"]
+    - key: "karpenter.sh/capacity-type"
       operator: In
       values: ["spot", "on-demand"]
-    - key: "topology.kubernetes.io/zone"
+    - key: "karpenter.k8s.aws/instance-category"
       operator: In
-      values: ${jsonencode(local.azs)}
+      values: ["c", "m", "r"]
   kubeletConfiguration:
     containerRuntime: containerd
     podsPerCore: 20
   limits:
     resources:
-      cpu: 100000
-      memory: 5000Gi
+      cpu: 1000
+      memory: 2000Gi
   consolidation:
     enabled: true
-  ttlSecondsUntilExpired: 604800
+  ttlSecondsUntilExpired: 604800 # 7 Days = 7 * 24 * 60 * 60 Seconds
   providerRef:
     name: default
+---
+apiVersion: karpenter.k8s.aws/v1alpha1
+kind: AWSNodeTemplate
+metadata:
+  name: default
+spec:
+  subnetSelector:
+    karpenter.sh/discovery: ${CLUSTER_NAME}
+  securityGroupSelector:
+    karpenter.sh/discovery: ${CLUSTER_NAME}
+  instanceProfile: ${KARPENTER_NODE_IAM_ROLE_NAME}
+  tags:
+    karpenter.sh/discovery: ${CLUSTER_NAME}
+    project: build-on-aws
+    KarpenerProvisionerName: "default"
+    NodeType: "default"
