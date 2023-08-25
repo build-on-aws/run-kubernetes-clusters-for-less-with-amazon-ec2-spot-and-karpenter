@@ -3,19 +3,21 @@ kind: Provisioner
 metadata:
   name: default
 spec:
+  labels:
+    intent: apps
   requirements:
-    - key: kubernetes.io/arch
-      operator: In
-      values: ["arm64", "amd64"]
     - key: "karpenter.sh/capacity-type"
       operator: In
       values: ["spot", "on-demand"]
     - key: "karpenter.k8s.aws/instance-category"
       operator: In
       values: ["c", "m", "r"]
-  kubeletConfiguration:
-    containerRuntime: containerd
-    podsPerCore: 20
+    - key: "karpenter.k8s.aws/instance-cpu"
+      operator: Gt
+      values: ["4"]
+    - key: "karpenter.k8s.aws/instance-memory"
+      operator: Gt
+      values: ["8191"] # 8 * 1024
   limits:
     resources:
       cpu: 1000
@@ -41,3 +43,4 @@ spec:
     project: build-on-aws
     KarpenerProvisionerName: "default"
     NodeType: "default"
+    intent: apps
