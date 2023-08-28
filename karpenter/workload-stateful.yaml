@@ -3,7 +3,7 @@ kind: Deployment
 metadata:
   name: stateful
 spec:
-  replicas: 10
+  replicas: 7
   selector:
     matchLabels:
       app: stateful

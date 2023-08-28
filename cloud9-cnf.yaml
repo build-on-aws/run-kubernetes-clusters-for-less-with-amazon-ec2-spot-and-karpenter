@@ -254,6 +254,8 @@ Resources:
             - curl -sSL https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 | bash
             - helm repo add stable https://charts.helm.sh/stable/
             - helm repo update
+            - sudo -H -u ec2-user aws cloud9 update-environment --environment-id ${C9_PID} --managed-credentials-action DISABLE
+            - sudo -H -u ec2-user rm -vf ${HOME}/.aws/credentials
             - echo '=== Finishing ==='
 
   C9BootstrapAssociation:

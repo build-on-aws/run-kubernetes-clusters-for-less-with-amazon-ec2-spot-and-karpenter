@@ -14,10 +14,10 @@ spec:
       values: ["c", "m", "r"]
     - key: "karpenter.k8s.aws/instance-cpu"
       operator: Gt
-      values: ["4"]
+      values: ["2"]
     - key: "karpenter.k8s.aws/instance-memory"
       operator: Gt
-      values: ["8191"] # 8 * 1024
+      values: ["4096"] # 4 * 1024
   limits:
     resources:
       cpu: 1000

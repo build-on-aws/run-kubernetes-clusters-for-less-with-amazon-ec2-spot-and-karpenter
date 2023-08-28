@@ -3,7 +3,7 @@ kind: Deployment
 metadata:
   name: stateless
 spec:
-  replicas: 10
+  replicas: 20
   selector:
     matchLabels:
       app: stateless
@@ -28,7 +28,8 @@ spec:
             matchLabels:
               app: stateless
           maxSkew: 1
-          topologyKey: topology.kubernetes.io/zone
+          minDomains: 3
+          topologyKey: topology.kubernetes.io/zone          
           whenUnsatisfiable: DoNotSchedule
       containers:
       - name: app
