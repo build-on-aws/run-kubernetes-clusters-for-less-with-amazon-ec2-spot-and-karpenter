@@ -14,15 +14,7 @@ spec:
     spec:
       nodeSelector:
         intent: apps
-      affinity:
-        nodeAffinity:
-          preferredDuringSchedulingIgnoredDuringExecution:
-          - weight: 1
-            preference:
-              matchExpressions:
-              - key: "karpenter.sh/capacity-type"
-                operator: "In"
-                values: ["spot"]
+        karpenter.sh/capacity-type: spot
       topologySpreadConstraints:
         - labelSelector:
             matchLabels:

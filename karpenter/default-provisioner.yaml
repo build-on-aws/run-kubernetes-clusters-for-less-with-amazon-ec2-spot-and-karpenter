@@ -17,7 +17,7 @@ spec:
       values: ["2"]
     - key: "karpenter.k8s.aws/instance-memory"
       operator: Gt
-      values: ["4096"] # 4 * 1024
+      values: ["4095"] # 4 * 1024
   limits:
     resources:
       cpu: 1000

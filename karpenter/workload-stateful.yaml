@@ -14,14 +14,7 @@ spec:
     spec:
       nodeSelector:
         intent: apps
-      affinity:
-        nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-            - matchExpressions:
-                - key: "karpenter.sh/capacity-type"
-                  operator: "In"
-                  values: ["on-demand"]
+        karpenter.sh/capacity-type: on-demand
       containers:
       - name: app
         image: public.ecr.aws/eks-distro/kubernetes/pause:3.7
