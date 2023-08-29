@@ -249,13 +249,11 @@ Resources:
             - echo '=== Install Terraform ==='
             - sudo yum install -y yum-utils
             - sudo yum-config-manager --add-repo https://rpm.releases.hashicorp.com/AmazonLinux/hashicorp.repo
-            - sudo yum -y install terraform-1.5.5            
+            - sudo yum -y install terraform-1.5.6            
             - echo '=== Install Helm ==='
             - curl -sSL https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 | bash
             - helm repo add stable https://charts.helm.sh/stable/
             - helm repo update
-            - sudo -H -u ec2-user aws cloud9 update-environment --environment-id ${C9_PID} --managed-credentials-action DISABLE
-            - sudo -H -u ec2-user rm -vf ${HOME}/.aws/credentials
             - echo '=== Finishing ==='
 
   C9BootstrapAssociation:
