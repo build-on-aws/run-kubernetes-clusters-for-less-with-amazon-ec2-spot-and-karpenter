@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stateful
+spec:
+  replicas: 7
+  selector:
+    matchLabels:
+      app: stateful
+  template:
+    metadata:
+      labels:
+        app: stateful
+    spec:
+      nodeSelector:
+        intent: apps
+        karpenter.sh/capacity-type: on-demand
+      containers:
+      - name: app
+        image: public.ecr.aws/eks-distro/kubernetes/pause:3.7
+        resources:
+          requests:
+            cpu: 512m
+            memory: 512Mi

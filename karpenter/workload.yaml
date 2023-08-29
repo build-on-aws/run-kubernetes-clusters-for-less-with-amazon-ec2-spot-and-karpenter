@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: stateless
+spec:
+  replicas: 20
+  selector:
+    matchLabels:
+      app: stateless
+  template:
+    metadata:
+      labels:
+        app: stateless
+    spec:
+      nodeSelector:
+        intent: apps
+        karpenter.sh/capacity-type: spot
+      topologySpreadConstraints:
+        - labelSelector:
+            matchLabels:
+              app: stateless
+          maxSkew: 1
+          minDomains: 3
+          topologyKey: topology.kubernetes.io/zone          
+          whenUnsatisfiable: DoNotSchedule
+      containers:
+      - name: app
+        image: public.ecr.aws/eks-distro/kubernetes/pause:3.7
+        resources:
+          requests:
+            cpu: 512m
+            memory: 512Mi

@@ -1,0 +1,46 @@
+apiVersion: karpenter.sh/v1alpha5
+kind: Provisioner
+metadata:
+  name: default
+spec:
+  labels:
+    intent: apps
+  requirements:
+    - key: "karpenter.sh/capacity-type"
+      operator: In
+      values: ["spot", "on-demand"]
+    - key: "karpenter.k8s.aws/instance-category"
+      operator: In
+      values: ["c", "m", "r"]
+    - key: "karpenter.k8s.aws/instance-cpu"
+      operator: Gt
+      values: ["2"]
+    - key: "karpenter.k8s.aws/instance-memory"
+      operator: Gt
+      values: ["4095"] # 4 * 1024
+  limits:
+    resources:
+      cpu: 1000
+      memory: 2000Gi
+  consolidation:
+    enabled: true
+  ttlSecondsUntilExpired: 604800 # 7 Days = 7 * 24 * 60 * 60 Seconds
+  providerRef:
+    name: default
+---
+apiVersion: karpenter.k8s.aws/v1alpha1
+kind: AWSNodeTemplate
+metadata:
+  name: default
+spec:
+  subnetSelector:
+    karpenter.sh/discovery: ${CLUSTER_NAME}
+  securityGroupSelector:
+    karpenter.sh/discovery: ${CLUSTER_NAME}
+  instanceProfile: ${KARPENTER_NODE_IAM_ROLE_NAME}
+  tags:
+    karpenter.sh/discovery: ${CLUSTER_NAME}
+    project: build-on-aws
+    KarpenerProvisionerName: "default"
+    NodeType: "default"
+    intent: apps

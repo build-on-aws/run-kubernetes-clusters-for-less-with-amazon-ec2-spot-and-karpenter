@@ -1,11 +1,6 @@
-## My Project
+## Run Kubernetes Clusters for Less with Amazon EC2 Spot and Karpenter
 
-TODO: Fill this README out!
-
-Be sure to:
-
-* Change the title in this README
-* Edit your repository description on GitHub
+This repo is part of the [Run Kubernetes Clusters for Less with Amazon EC2 Spot and Karpenter](https://community.aws/tutorials/run-kubernetes-clusters-for-less-with-amazon-ec2-spot-and-karpenter) tutorial. It includes the Terraform template to create the cluster, and all the final versions of the Kubernetes manifests used during the tutorial.
 
 ## Security
 
