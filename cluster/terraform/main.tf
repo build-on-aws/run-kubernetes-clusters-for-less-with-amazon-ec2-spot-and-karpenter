@@ -25,6 +25,7 @@ terraform {
   }
 }
 
+## THIS TO AUTHENTICATE TO ECR, DON'T CHANGE IT
 provider "aws" {
   region = "us-east-1"
   alias  = "virginia"
@@ -52,10 +53,12 @@ provider "kubectl" {
   token                  = data.aws_eks_cluster_auth.this.token
 }
 
+## NOTE: It's going to use your AWS_REGION or AWS_DEFAULT_REGION environment variable,
+## but you can define which on to use in terraform.tfvars file as well, or pass it as an argument
+## in the CLI like this "terraform apply -var 'region=eu-west-1'"
 variable "region" {
   description = "Region to deploy the resources"
   type        = string
-  default     = "eu-west-1"
 }
 
 data "aws_eks_cluster_auth" "this" {
@@ -72,12 +75,13 @@ locals {
   name   = "spot-and-karpenter"
   region = var.region
 
-  cluster_version = "1.27"
+  cluster_version = "1.28"
 
   node_group_name = "managed-ondemand"
 
   vpc_cidr = "10.0.0.0/16"
-  azs      = slice(data.aws_availability_zones.available.names, 0, 3)
+  # NOTE: You might need to change this less number of AZs depending on the region you're deploying to
+  azs = slice(data.aws_availability_zones.available.names, 0, 2)
 
   tags = {
     blueprint = local.name

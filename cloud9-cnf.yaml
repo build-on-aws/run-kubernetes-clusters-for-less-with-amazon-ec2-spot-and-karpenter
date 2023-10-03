@@ -20,9 +20,9 @@ Parameters:
   C9InstanceType:
     Description: Example Cloud9 instance type
     Type: String
-    Default: t3.micro
+    Default: t3.small
     AllowedValues:
-      - t3.micro
+      - t3.small
       - m5.large
     ConstraintDescription: Must be a valid Cloud9 instance type
   C9KubectlVersion:
@@ -30,16 +30,9 @@ Parameters:
     Type: String
     Default: v1.27.3
     ConstraintDescription: Must be a valid kubectl version
-  C9KubectlVersionTEST:
-    Description: Cloud9 instance kubectl version
-    Type: String
-    Default: v1.27.3
-    ConstraintDescription: Must be a valid kubectl version
-  C9EKSctlVersion:
-    Description: Cloud9 instance eksctl version
-    Type: String
-    Default: v0.153.0
-    ConstraintDescription: Must be a valid eksctl version
+  C9PublicSubnet:
+    Description: Public subnet to use for the Cloud9 instance
+    Type: AWS::EC2::Subnet::Id
 
 Resources:
 
@@ -63,6 +56,7 @@ Resources:
       ManagedPolicyArns:
       - arn:aws:iam::aws:policy/AdministratorAccess
       Path: "/"
+
   C9LambdaExecutionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -101,37 +95,58 @@ Resources:
             - ec2:AssociateIamInstanceProfile
             - ec2:ModifyInstanceAttribute
             - ec2:ReplaceIamInstanceProfileAssociation
+            - ec2:DescribeIamInstanceProfileAssociations
             - iam:ListInstanceProfiles
-            - iam:PassRole
+            - iam:PassRole     
             Resource: "*"
+          - Effect: Allow
+            Action:
+              - s3:ListBucket
+              - s3:DeleteObject
+            Resource:
+              - !Sub arn:${AWS::Partition}:s3:::${C9OutputBucket}
+              - !Sub arn:${AWS::Partition}:s3:::${C9OutputBucket}/*
+
 
 ################## LAMBDA BOOTSTRAP FUNCTION ################
-
   C9BootstrapInstanceLambda:
-    Description: Bootstrap Cloud9 instance
-    Type: Custom::C9BootstrapInstanceLambda
+    Type: Custom::Cloud9BootstrapInstanceLambda
     DependsOn:
-    - C9BootstrapInstanceLambdaFunction
-    - C9Instance
-    - C9LambdaExecutionRole
+      - C9LambdaExecutionRole
     Properties:
       Tags:
         - Key: Environment
           Value: AWS Example
       ServiceToken:
         Fn::GetAtt:
-        - C9BootstrapInstanceLambdaFunction
-        - Arn
-      REGION:
+          - C9BootstrapInstanceLambdaFunction
+          - Arn
+      Region:
         Ref: AWS::Region
       StackName:
         Ref: AWS::StackName
       EnvironmentId:
         Ref: C9Instance
-      LabIdeInstanceProfileArn: !GetAtt C9InstanceProfile.Arn
+      LabIdeInstanceProfileName:
+        Ref: C9InstanceProfile
+      LabIdeInstanceProfileArn:
+        Fn::GetAtt:
+          - C9InstanceProfile
+          - Arn
+      LogBucket:
+        Ref: C9OutputBucket
 
   C9BootstrapInstanceLambdaFunction:
     Type: AWS::Lambda::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W58
+            reason: Cloud9LambdaExecutionRole has the AWSLambdaBasicExecutionRole managed policy attached, allowing writing to CloudWatch logs
+          - id: W89
+            reason: Bootstrap function does not need the scaffolding of a VPC or provisioned concurrency
+          - id: W92
+            reason: Bootstrap function does not need provisioned concurrency   
     Properties:
       Tags:
         - Key: Environment
@@ -139,65 +154,166 @@ Resources:
       Handler: index.lambda_handler
       Role:
         Fn::GetAtt:
-        - C9LambdaExecutionRole
-        - Arn
+          - C9LambdaExecutionRole
+          - Arn
       Runtime: python3.9
-      MemorySize: 256
-      Timeout: '600'
+      MemorySize: 1024
+      Timeout: 400
       Code:
         ZipFile: |
           from __future__ import print_function
           import boto3
-          # import logging
           import json
           import os
           import time
           import traceback
           import cfnresponse
+          import logging
 
-          # logging.basicConfig(level=logging.INFO)
-          # logger = logging.getLogger(__name__)
+          logger = logging.getLogger(__name__)
+          logger.setLevel(logging.INFO)
 
           def lambda_handler(event, context):
-              # logger.info('event: {}'.format(event))
-              # logger.info('context: {}'.format(context))
+              logger.info("event: {}".format(event))
+              logger.info("context: {}".format(context))
               responseData = {}
 
-              if event['RequestType'] == 'Create':
+              if event["RequestType"] == "Create":
                   try:
                       # Open AWS clients
-                      ec2 = boto3.client('ec2')
+                      ec2 = boto3.client("ec2")
 
                       # Get the InstanceId of the Cloud9 IDE
-                      # print(str({'Name': 'tag:aws:cloud9:environment','Values': [event['ResourceProperties']['EnvironmentId']]}))
-                      instance = ec2.describe_instances(Filters=[{'Name': 'tag:aws:cloud9:environment','Values': [event['ResourceProperties']['EnvironmentId']]}])['Reservations'][0]['Instances'][0]
-                      # logger.info('instance: {}'.format(instance))
+                      instance = ec2.describe_instances(
+                          Filters=[
+                              {
+                                  "Name": "tag:aws:cloud9:environment",
+                                  "Values": [event["ResourceProperties"]["EnvironmentId"]],
+                              }
+                          ]
+                      )["Reservations"][0]["Instances"][0]
+                      logger.info("instance: {}".format(instance))
 
                       # Create the IamInstanceProfile request object
                       iam_instance_profile = {
-                          'Arn': event['ResourceProperties']['LabIdeInstanceProfileArn']
+                          "Arn": event["ResourceProperties"]["LabIdeInstanceProfileArn"],
+                          "Name": event["ResourceProperties"]["LabIdeInstanceProfileName"],
                       }
-                      # logger.info('iam_instance_profile: {}'.format(iam_instance_profile))
+                      logger.info("iam_instance_profile: {}".format(iam_instance_profile))
 
                       # Wait for Instance to become ready before adding Role
-                      instance_state = instance['State']['Name']
-                      # logger.info('instance_state: {}'.format(instance_state))
-                      while instance_state != 'running':
+                      instance_state = instance["State"]["Name"]
+                      logger.info("instance_state: {}".format(instance_state))
+                      while instance_state != "running":
                           time.sleep(5)
-                          instance_state = ec2.describe_instances(InstanceIds=[instance['InstanceId']])
-                        # logger.info('instance_state: {}'.format(instance_state))
+                          instance_state = ec2.describe_instances(
+                              InstanceIds=[instance["InstanceId"]]
+                          )
+                          logger.info("instance_state: {}".format(instance_state))
 
-                      # attach instance profile
-                      response = ec2.associate_iam_instance_profile(IamInstanceProfile=iam_instance_profile, InstanceId=instance['InstanceId'])
-                      # logger.info('response - associate_iam_instance_profile: {}'.format(response))
-                      r_ec2 = boto3.resource('ec2')
+                      response = ec2.describe_iam_instance_profile_associations(
+                          Filters=[
+                              {
+                                  "Name": "instance-id",
+                                  "Values": [instance["InstanceId"]],
+                              }
+                          ]
+                      )
+                      
+                      if len(response['IamInstanceProfileAssociations']) > 0:
+                          for association in response['IamInstanceProfileAssociations']:
+                              if association['State'] == 'associated':
+                                  print("{} is active with state {}".format(association['AssociationId'], association['State']))
+                                  logger.info(
+                                      "{} is active with state {}".format(association['AssociationId'], association['State'])
+                                  )
+                                  ec2.replace_iam_instance_profile_association(
+                                    AssociationId=association['AssociationId'], 
+                                    IamInstanceProfile=iam_instance_profile
+                                  )
+                      else:
+                          # attach instance profile
+                          response = ec2.associate_iam_instance_profile(
+                              IamInstanceProfile=iam_instance_profile,
+                              InstanceId=instance["InstanceId"],
+                          )
+                          logger.info(
+                              "response - associate_iam_instance_profile: {}".format(response)
+                          )
+                          # r_ec2 = boto3.resource('ec2')
 
-                      responseData = {'Success': 'Started bootstrapping for instance: '+instance['InstanceId']}
-                      cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData, 'CustomResourcePhysicalID')
+                      responseData = {
+                          "Success": "Started bootstrapping for instance: "
+                          + instance["InstanceId"]
+                      }
+                      cfnresponse.send( 
+                          event,
+                          context,
+                          cfnresponse.SUCCESS,
+                          responseData,
+                          "CustomResourcePhysicalID",
+                      )
 
                   except Exception as e:
-                      responseData = {'Error': str(e)}
-                      cfnresponse.send(event, context, cfnresponse.FAILED, responseData, 'CustomResourcePhysicalID')
+                      logger.error(e, exc_info=True)
+                      # responseData = {'Error': traceback.format_exc(e)}
+                      responseData = {
+                          "Error": "There was a problem associating IAM profile to the Cloud9 Instance"
+                      }
+                      cfnresponse.send(
+                          event,
+                          context,
+                          cfnresponse.FAILED,
+                          responseData,
+                          "CustomResourcePhysicalID",
+                      )
+              elif event["RequestType"] == "Update":
+                  responseData["Message"] = {"Success": "Update event"}
+                  cfnresponse.send(
+                      event,
+                      context,
+                      cfnresponse.SUCCESS,
+                      responseData,
+                      "CustomResourcePhysicalID",
+                  )
+              elif event["RequestType"] == "Delete":
+                  try:
+                      # Need to empty the S3 bucket before it is deleted
+                      AssetsBucketName = (event["ResourceProperties"]["LogBucket"])
+                      s3 = boto3.resource("s3")
+                      bucket = s3.Bucket(AssetsBucketName)
+                      bucket.objects.all().delete()
+                      responseData = {
+                          "Success": "S3 Log bucket emptied for S3 Log Bucket: " + AssetsBucketName
+                      }
+                      cfnresponse.send(
+                          event,
+                          context,
+                          cfnresponse.SUCCESS,
+                          responseData,
+                          "CustomResourcePhysicalID",
+                      )
+                  except Exception as e:
+                      logger.error(e, exc_info=True)
+                      # responseData = {'Error': traceback.format_exc(e)}
+                      responseData = {"Error": "There was a problem emptying the S3 bucket"}
+                      cfnresponse.send(
+                          event,
+                          context,
+                          cfnresponse.FAILED,
+                          responseData,
+                          "CustomResourcePhysicalID",
+                      )
+              else:
+                  responseData = {"Success": "Other event"}
+                  cfnresponse.send(
+                      event,
+                      context,
+                      cfnresponse.SUCCESS,
+                      responseData,
+                      "CustomResourcePhysicalID",
+                  )
+
 ################## SSM BOOTSRAP HANDLER ###############
   C9OutputBucket:
     Type: AWS::S3::Bucket
@@ -285,6 +401,8 @@ Resources:
     Properties:
       Description: AWS Cloud9 instance for Examples
       AutomaticStopTimeMinutes: 3600
+      SubnetId: 
+        Ref: C9PublicSubnet
       InstanceType:
         Ref: C9InstanceType
       Name: 

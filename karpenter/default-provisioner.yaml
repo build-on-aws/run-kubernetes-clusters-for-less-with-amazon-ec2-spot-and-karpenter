@@ -14,14 +14,14 @@ spec:
       values: ["c", "m", "r"]
     - key: "karpenter.k8s.aws/instance-cpu"
       operator: Gt
-      values: ["2"]
+      values: ["1"]
     - key: "karpenter.k8s.aws/instance-memory"
       operator: Gt
-      values: ["4095"] # 4 * 1024
+      values: ["2047"] # 2 * 1024 - 1
   limits:
     resources:
-      cpu: 1000
-      memory: 2000Gi
+      cpu: 100
+      memory: 200Gi
   consolidation:
     enabled: true
   ttlSecondsUntilExpired: 604800 # 7 Days = 7 * 24 * 60 * 60 Seconds
