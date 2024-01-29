@@ -260,7 +260,6 @@ output "cluster_name" {
   value       = module.eks.cluster_name
 }
 
-
 output "node_instance_profile_name" {
   description = "IAM Role name that each Karpenter node will use"
   value       = module.eks_blueprints_addons.karpenter.node_instance_profile_name
