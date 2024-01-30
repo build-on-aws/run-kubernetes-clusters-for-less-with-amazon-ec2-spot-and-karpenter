@@ -53,9 +53,6 @@ provider "kubectl" {
   token                  = data.aws_eks_cluster_auth.this.token
 }
 
-## NOTE: It's going to use your AWS_REGION or AWS_DEFAULT_REGION environment variable,
-## but you can define which on to use in terraform.tfvars file as well, or pass it as an argument
-## in the CLI like this "terraform apply -var 'region=eu-west-1'"
 variable "region" {
   description = "Region to deploy the resources"
   type        = string
@@ -72,16 +69,16 @@ data "aws_ecrpublic_authorization_token" "token" {
 data "aws_availability_zones" "available" {}
 
 locals {
-  name   = "spot-and-karpenter"
-  region = var.region
-
-  cluster_version = "1.28"
-
+  name            = "spot-and-karpenter"
+  cluster_version = "1.29"
+  region          = var.region
   node_group_name = "managed-ondemand"
+
+  node_iam_role_name = module.eks_blueprints_addons.karpenter.node_iam_role_name
 
   vpc_cidr = "10.0.0.0/16"
   # NOTE: You might need to change this less number of AZs depending on the region you're deploying to
-  azs = slice(data.aws_availability_zones.available.names, 0, 2)
+  azs = slice(data.aws_availability_zones.available.names, 0, 3)
 
   tags = {
     blueprint = local.name
@@ -93,16 +90,13 @@ locals {
 ################################################################################
 module "eks" {
   source  = "terraform-aws-modules/eks/aws"
-  version = "19.16.0"
+  version = "19.19.1"
 
   cluster_name                   = local.name
   cluster_version                = local.cluster_version
   cluster_endpoint_public_access = true
 
   cluster_addons = {
-    # aws-ebs-csi-driver = { most_recent = true }
-    kube-proxy = { most_recent = true }
-    coredns    = { most_recent = true }
 
     vpc-cni = {
       most_recent    = true
@@ -119,6 +113,7 @@ module "eks" {
   vpc_id     = module.vpc.vpc_id
   subnet_ids = module.vpc.private_subnets
 
+  create_cloudwatch_log_group   = false
   create_cluster_security_group = false
   create_node_security_group    = false
 
@@ -149,7 +144,10 @@ module "eks" {
       # Launch template configuration
       create_launch_template = true              # false will use the default launch template
       launch_template_os     = "amazonlinux2eks" # amazonlinux2eks or bottlerocket
-      kubelet_extra_args     = "--node-labels=intent=control-apps"
+
+      labels = {
+        intent = "control-apps"
+      }
     }
   }
 
@@ -159,17 +157,25 @@ module "eks" {
 }
 
 module "eks_blueprints_addons" {
-  source  = "aws-ia/eks-blueprints-addons/aws"
-  version = "1.7.0"
+  source = "aws-ia/eks-blueprints-addons/aws"
+  version = "1.13.0"
 
   cluster_name      = module.eks.cluster_name
   cluster_endpoint  = module.eks.cluster_endpoint
   cluster_version   = module.eks.cluster_version
   oidc_provider_arn = module.eks.oidc_provider_arn
 
-  create_delay_dependencies = [for prof in module.eks.eks_managed_node_groups : prof.node_group_arn]
-
-  enable_metrics_server = true
+  eks_addons = {
+    aws-ebs-csi-driver = {
+      most_recent = true
+    }
+    coredns = {
+      most_recent = true
+    }
+    kube-proxy = {
+      most_recent = true
+    }
+  }
 
   enable_karpenter = true
   karpenter = {
@@ -177,9 +183,30 @@ module "eks_blueprints_addons" {
     repository_password = data.aws_ecrpublic_authorization_token.token.password
   }
   karpenter_enable_spot_termination = true
+  karpenter_enable_instance_profile_creation = true
+  karpenter_node = {
+    iam_role_use_name_prefix = false
+  }
 
   tags = local.tags
+}
 
+module "ebs_csi_driver_irsa" {
+  source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks"
+  version = "5.20"
+
+  role_name_prefix = "${module.eks.cluster_name}-ebs-csi-driver-"
+
+  attach_ebs_csi_policy = true
+
+  oidc_providers = {
+    main = {
+      provider_arn               = module.eks.oidc_provider_arn
+      namespace_service_accounts = ["kube-system:ebs-csi-controller-sa"]
+    }
+  }
+
+  tags = local.tags
 }
 
 #---------------------------------------------------------------

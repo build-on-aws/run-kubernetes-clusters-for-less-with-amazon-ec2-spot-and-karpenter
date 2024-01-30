@@ -28,11 +28,23 @@ Parameters:
   C9KubectlVersion:
     Description: Cloud9 instance kubectl version
     Type: String
-    Default: v1.27.3
+    Default: v1.29.1
     ConstraintDescription: Must be a valid kubectl version
+  C9TerraformVersion:
+    Type: String
+    Default: 1.7.1
+    ConstraintDescription: Must be a valid terraform version
+  C9NodeViewerVersion:
+    Type: String
+    Default: v0.5.0
+    ConstraintDescription: Must be a valid eks node viewer version
   C9PublicSubnet:
     Description: Public subnet to use for the Cloud9 instance
     Type: AWS::EC2::Subnet::Id
+  C9ImageId:
+    Description: ImageId for the Cloud9 instance
+    Type: String
+    Default: amazonlinux-2023-x86_64
 
 Resources:
 
@@ -96,6 +108,7 @@ Resources:
             - ec2:ModifyInstanceAttribute
             - ec2:ReplaceIamInstanceProfileAssociation
             - ec2:DescribeIamInstanceProfileAssociations
+            - ec2:RebootInstances
             - iam:ListInstanceProfiles
             - iam:PassRole     
             Resource: "*"
@@ -173,6 +186,21 @@ Resources:
           logger = logging.getLogger(__name__)
           logger.setLevel(logging.INFO)
 
+          def restart_instance(instance_id):
+              logger.info('Restart EC2 instance to restart SSM Agent')
+              ec2 = boto3.client('ec2')
+
+              try:
+                  response = ec2.reboot_instances(
+                      InstanceIds=[
+                          instance_id
+                      ]
+                  )
+              except Exception as error:
+                  raise error
+
+              logger.info('response: %s', response)
+
           def lambda_handler(event, context):
               logger.info("event: {}".format(event))
               logger.info("context: {}".format(context))
@@ -227,11 +255,13 @@ Resources:
                                   logger.info(
                                       "{} is active with state {}".format(association['AssociationId'], association['State'])
                                   )
+                                  time.sleep(120)
                                   ec2.replace_iam_instance_profile_association(
                                     AssociationId=association['AssociationId'], 
                                     IamInstanceProfile=iam_instance_profile
                                   )
                       else:
+                          time.sleep(120)
                           # attach instance profile
                           response = ec2.associate_iam_instance_profile(
                               IamInstanceProfile=iam_instance_profile,
@@ -241,6 +271,8 @@ Resources:
                               "response - associate_iam_instance_profile: {}".format(response)
                           )
                           # r_ec2 = boto3.resource('ec2')
+
+                      restart_instance(instance['InstanceId'])
 
                       responseData = {
                           "Success": "Started bootstrapping for instance: "
@@ -351,26 +383,34 @@ Resources:
             - sudo -H -u ec2-user aws --version
             - curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
             - unzip awscliv2.zip
-            - sudo ./aws/install            
+            - sudo ./aws/install --update     
+            - rm awscliv2.zip         
             - sudo -H -u ec2-user aws --version
             - echo '=== setup AWS configs ==='            
             - rm -vf /home/ec2-user/.aws/credentials
-            - export ACCOUNT_ID=$(aws sts get-caller-identity --output text --query Account)
-            - export AWS_REGION=$(curl -s 169.254.169.254/latest/dynamic/instance-identity/document | jq -r '.region')
-            - echo "export ACCOUNT_ID=${ACCOUNT_ID}" >> /home/ec2-user/.bash_profile
-            - echo "export AWS_REGION=${AWS_REGION}" >> /home/ec2-user/.bash_profile
+            - !Sub 'echo "export AWS_REGION=${AWS::Region}" >> /home/ec2-user/.bash_profile'
             - sudo -H -u ec2-user aws configure set default.region ${AWS_REGION}
-            - sudo -H -u ec2-user aws configure get default.region
             - sudo -H -u ec2-user aws sts get-caller-identity            
             - echo '=== Install Terraform ==='
             - sudo yum install -y yum-utils
             - sudo yum-config-manager --add-repo https://rpm.releases.hashicorp.com/AmazonLinux/hashicorp.repo
-            - sudo yum -y install terraform-1.5.6            
+            - !Sub 'export TERRAFORM_VERSION=${C9TerraformVersion}'
+            - sudo yum -y install terraform-${TERRAFORM_VERSION} 
+            - terraform -v          
             - echo '=== Install Helm ==='
             - curl -sSL https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 | bash
             - helm repo add stable https://charts.helm.sh/stable/
             - helm repo update
+            - echo '=== Install eks-node-viewer ==='
+            - !Sub 'export NODEVIEWER_VERSION=${C9NodeViewerVersion}'
+            - sudo -H -u ec2-user go install github.com/awslabs/eks-node-viewer/cmd/eks-node-viewer@${NODEVIEWER_VERSION}
+            - sudo -H -u ec2-user echo "export PATH=/home/ec2-user/go/bin:$PATH" >> /home/ec2-user/.bashrc
+            - eks-node-viewer -v
             - echo '=== Finishing ==='
+            - !Sub 'export CFN_RESPONSE_URL="${WaitForStackCreationHandle}"'
+            - |
+              curl -X PUT -H 'Content-Type:' --data-binary '{"Status" : "SUCCESS","Reason" : "Creation Complete", "UniqueId" : "1","Data" : "Creation complete"}' $CFN_RESPONSE_URL
+            - sudo shutdown --reboot 1
 
   C9BootstrapAssociation:
     Type: AWS::SSM::Association
@@ -387,6 +427,17 @@ Resources:
           Values:
           - Active
 
+  WaitForStackCreationHandle:
+      Type: AWS::CloudFormation::WaitConditionHandle
+
+  WaitCondition:
+    Type: AWS::CloudFormation::WaitCondition
+    DependsOn: [C9BootstrapInstanceLambda]
+    Properties:
+      Handle: !Ref WaitForStackCreationHandle
+      Timeout: 7200
+      Count: 1
+
 ################## INSTANCE #####################
   C9InstanceProfile:
     Type: AWS::IAM::InstanceProfile
@@ -401,6 +452,8 @@ Resources:
     Properties:
       Description: AWS Cloud9 instance for Examples
       AutomaticStopTimeMinutes: 3600
+      ImageId: 
+        Ref: C9ImageId
       SubnetId: 
         Ref: C9PublicSubnet
       InstanceType:
@@ -428,3 +481,4 @@ Outputs:
         - Ref: C9Instance
         - "?region="
         - Ref: AWS::Region
+
