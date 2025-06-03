@@ -15,8 +15,8 @@ terraform {
       version = ">= 2.4.1"
     }
     kubectl = {
-      source  = "gavinbunney/kubectl"
-      version = ">= 1.14"
+      source  = "alekc/kubectl"
+      version = ">= 2.0.2"
     }
     docker = {
       source  = "kreuzwerker/docker"
@@ -29,6 +29,10 @@ terraform {
 provider "aws" {
   region = "us-east-1"
   alias  = "virginia"
+}
+
+provider "aws" {
+  region = local.region
 }
 
 provider "kubernetes" {
@@ -66,11 +70,16 @@ data "aws_ecrpublic_authorization_token" "token" {
   provider = aws.virginia
 }
 
-data "aws_availability_zones" "available" {}
+data "aws_availability_zones" "available" {
+  filter {
+    name   = "opt-in-status"
+    values = ["opt-in-not-required"]
+  }
+}
 
 locals {
-  name            = "spot-and-karpenter"
-  cluster_version = "1.29"
+  name            = "karpenter-spot"
+  cluster_version = "1.33"
   region          = var.region
   node_group_name = "managed-ondemand"
 
@@ -90,13 +99,15 @@ locals {
 ################################################################################
 module "eks" {
   source  = "terraform-aws-modules/eks/aws"
-  version = "19.19.1"
+  version = "20.36.0"
 
   cluster_name                   = local.name
   cluster_version                = local.cluster_version
   cluster_endpoint_public_access = true
 
   cluster_addons = {
+    kube-proxy = { most_recent = true }
+    coredns    = { most_recent = true }
 
     vpc-cni = {
       most_recent    = true
@@ -113,21 +124,11 @@ module "eks" {
   vpc_id     = module.vpc.vpc_id
   subnet_ids = module.vpc.private_subnets
 
-  create_cloudwatch_log_group   = false
-  create_cluster_security_group = false
-  create_node_security_group    = false
-
-  manage_aws_auth_configmap = true
-  aws_auth_roles = [
-    {
-      rolearn  = module.eks_blueprints_addons.karpenter.node_iam_role_arn
-      username = "system:node:{{EC2PrivateDNSName}}"
-      groups = [
-        "system:bootstrappers",
-        "system:nodes",
-      ]
-    }
-  ]
+  create_cloudwatch_log_group              = false
+  create_cluster_security_group            = false
+  create_node_security_group               = false
+  authentication_mode                      = "API_AND_CONFIG_MAP"
+  enable_cluster_creator_admin_permissions = true
 
   eks_managed_node_groups = {
     mg_5 = {
@@ -157,32 +158,30 @@ module "eks" {
 }
 
 module "eks_blueprints_addons" {
-  source = "aws-ia/eks-blueprints-addons/aws"
-  version = "1.13.0"
+  source  = "aws-ia/eks-blueprints-addons/aws"
+  version = "1.21.0"
 
   cluster_name      = module.eks.cluster_name
   cluster_endpoint  = module.eks.cluster_endpoint
   cluster_version   = module.eks.cluster_version
   oidc_provider_arn = module.eks.oidc_provider_arn
 
+  create_delay_dependencies = [for prof in module.eks.eks_managed_node_groups : prof.node_group_arn]
+
   eks_addons = {
     aws-ebs-csi-driver = {
-      most_recent = true
-    }
-    coredns = {
-      most_recent = true
-    }
-    kube-proxy = {
-      most_recent = true
+      service_account_role_arn = module.ebs_csi_driver_irsa.iam_role_arn
     }
   }
 
   enable_karpenter = true
+
   karpenter = {
+    chart_version       = "1.5.0"
     repository_username = data.aws_ecrpublic_authorization_token.token.user_name
     repository_password = data.aws_ecrpublic_authorization_token.token.password
   }
-  karpenter_enable_spot_termination = true
+  karpenter_enable_spot_termination          = true
   karpenter_enable_instance_profile_creation = true
   karpenter_node = {
     iam_role_use_name_prefix = false
@@ -193,7 +192,7 @@ module "eks_blueprints_addons" {
 
 module "ebs_csi_driver_irsa" {
   source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks"
-  version = "5.20"
+  version = "5.55.0"
 
   role_name_prefix = "${module.eks.cluster_name}-ebs-csi-driver-"
 
@@ -209,13 +208,28 @@ module "ebs_csi_driver_irsa" {
   tags = local.tags
 }
 
+module "aws-auth" {
+  source  = "terraform-aws-modules/eks/aws//modules/aws-auth"
+  version = "~> 20.0"
+
+  manage_aws_auth_configmap = true
+
+  aws_auth_roles = [
+    {
+      rolearn  = module.eks_blueprints_addons.karpenter.node_iam_role_arn
+      username = "system:node:{{EC2PrivateDNSName}}"
+      groups   = ["system:bootstrappers", "system:nodes"]
+    },
+  ]
+}
+
 #---------------------------------------------------------------
 # Supporting Resources
 #---------------------------------------------------------------
 
 module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
-  version = "5.0.0"
+  version = "5.21.0"
 
   name = local.name
   cidr = local.vpc_cidr
@@ -259,13 +273,12 @@ output "cluster_name" {
   description = "Cluster name of the EKS cluster"
   value       = module.eks.cluster_name
 }
-
-output "node_instance_profile_name" {
-  description = "IAM Role name that each Karpenter node will use"
-  value       = module.eks_blueprints_addons.karpenter.node_instance_profile_name
-}
-
 output "vpc_id" {
   description = "VPC ID that the EKS cluster is using"
   value       = module.vpc.vpc_id
+}
+
+output "node_instance_role_name" {
+  description = "IAM Role name that each Karpenter node will use"
+  value       = module.eks_blueprints_addons.karpenter.node_iam_role_name
 }
